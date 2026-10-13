@@ -232,7 +232,7 @@ def scene_object(d, scene, t, rng, cx=670, cy=275):
                 d.line((xx,yy-22,xx,yy+22),fill=INK,width=4)
     else:
         for k in range(5):
-            star(d,520+k*72,244+20*math.sin(t+k),27,list(COLORS.values())[k])
+            star(d,x-170+k*85,y-20+20*math.sin(t+k),27,list(COLORS.values())[k])
 
 
 def make_frame(scene, hero, seconds_in_scene, global_time, seed):
