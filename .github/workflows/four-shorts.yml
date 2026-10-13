@@ -1,0 +1,83 @@
+name: Generate four extra Shorts
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/four-shorts.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  generate-four:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install rendering and speech software
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg espeak-ng fonts-dejavu-core
+      - name: Install Pillow
+        run: pip install -r requirements.txt
+      - name: Test cartoon factory
+        run: python -m unittest discover -s tests -v
+      - name: Generate four different Shorts
+        shell: bash
+        run: |
+          set -euo pipefail
+          topics=(colors shapes counting colors)
+          for index in 0 1 2 3; do
+            episode=$((index+1))
+            topic="${topics[$index]}"
+            seed=$(( GITHUB_RUN_ID * 10 + episode ))
+            echo "::group::Short $episode - $topic (seed $seed)"
+            python factory.py --format shorts --fps 10 --topic "$topic" --seed "$seed" --output "four-shorts/short-$episode"
+            echo "::endgroup::"
+          done
+      - name: Verify four rendered Shorts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          items=[]
+          for i in range(1,5):
+              folder=Path(f'four-shorts/short-{i}')
+              mp4=folder/'episode.mp4'
+              meta=json.loads((folder/'metadata.json').read_text())
+              assert mp4.stat().st_size>100_000, mp4
+              assert meta['video_format']=='shorts'
+              assert meta['video_width']==720 and meta['video_height']==1280
+              assert meta['duration_seconds']<180
+              assert (folder/'thumbnail.jpg').exists()
+              probe=json.loads(subprocess.check_output(['ffprobe','-v','quiet','-print_format','json','-show_streams',str(mp4)]))
+              video=next(s for s in probe['streams'] if s['codec_type']=='video')
+              audio=next(s for s in probe['streams'] if s['codec_type']=='audio')
+              assert video['width']==720 and video['height']==1280
+              assert video['codec_name']=='h264' and audio['codec_name']=='aac'
+              items.append({'episode':i,'topic':meta['topic'],'character':meta['character'],'duration_seconds':meta['duration_seconds'],'file':str(mp4)})
+          assert len(items)==4
+          (Path('four-shorts')/'manifest.json').write_text(json.dumps(items,indent=2))
+          print(json.dumps(items,indent=2))
+          PY
+      - name: Upload all four Shorts in one downloadable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: four-vertical-shorts-${{ github.run_id }}
+          path: |
+            four-shorts/short-*/episode.mp4
+            four-shorts/short-*/metadata.json
+            four-shorts/short-*/thumbnail.jpg
+            four-shorts/short-*/captions.txt
+            four-shorts/manifest.json
+          if-no-files-found: error
+          retention-days: 7
