@@ -1,4 +1,4 @@
-"""Upload generated episode as PRIVATE and Made for Kids using user OAuth. Never logs tokens."""
+"""Upload generated episode as PUBLIC and Made for Kids using user OAuth. Never logs tokens."""
 import json
 import os
 from pathlib import Path
@@ -29,7 +29,7 @@ def main():
     body={
        'snippet':{'title':meta['title'][:100],'description':meta['description'][:5000],
                   'tags':meta['tags'],'categoryId':'27','defaultLanguage':'en'},
-       'status':{'privacyStatus':'private','selfDeclaredMadeForKids':True,
+       'status':{'privacyStatus':'public','selfDeclaredMadeForKids':True,
                  'license':'youtube'}
     }
     request=youtube.videos().insert(part='snippet,status',body=body,
@@ -40,14 +40,14 @@ def main():
         if status:
             print(f'Upload {round(status.progress()*100)}%')
     video_id=response['id']
-    print('PRIVATE video uploaded: https://studio.youtube.com/video/'+video_id+'/edit')
+    print('Video uploaded (public requested): https://studio.youtube.com/video/'+video_id+'/edit')
     try:
         youtube.thumbnails().set(videoId=video_id,
             media_body=MediaFileUpload(str(folder/'thumbnail.jpg'),mimetype='image/jpeg')).execute()
         print('Custom thumbnail uploaded.')
     except Exception as exc:
         print('Thumbnail upload failed; video upload succeeded:',str(exc)[:250])
-    (folder/'upload_result.json').write_text(json.dumps({'video_id':video_id,'privacy':'private',
+    (folder/'upload_result.json').write_text(json.dumps({'video_id':video_id,'privacy':'public_requested',
         'made_for_kids':True}),encoding='utf-8')
     return 0
 
