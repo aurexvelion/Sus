@@ -94,19 +94,29 @@ def create_story(topic, seed):
 
 
 def make_narration(line, filename):
-    """Generate Jenny Neural speech and convert to 16-bit mono PCM for mixing."""
+    """Prefer neural female narration; fall back to local eSpeak when unavailable."""
     mp3 = Path(filename).with_suffix(".mp3")
+    cmd = ["python", "-m", "edge_tts", "--voice", "en-US-JennyNeural",
+           "--rate=-10%", "--pitch=+0Hz", "--text", line,
+           "--write-media", str(mp3)]
     try:
-        subprocess.run(
-            ["python", "-m", "edge_tts", "--voice", "en-US-JennyNeural",
-             "--rate=-10%", "--pitch=+0Hz", "--text", line,
-             "--write-media", str(mp3)],
-            check=True, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode:
+            raise RuntimeError((result.stderr or result.stdout or "unknown error")[-1200:])
         subprocess.run(
             ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
              "-i", str(mp3), "-ar", str(RATE), "-ac", "1",
              "-c:a", "pcm_s16le", str(filename)],
             check=True, capture_output=True, text=True, timeout=60)
+    except (RuntimeError, subprocess.SubprocessError, OSError) as exc:
+        print(f"WARNING: Jenny Neural unavailable: {exc}", flush=True)
+        synth = shutil.which("espeak-ng") or shutil.which("espeak")
+        if not synth:
+            raise RuntimeError("Neural voice failed and local fallback is not installed") from exc
+        subprocess.run([synth, "-v", "en+f3", "-s", "125", "-p", "65",
+                        "-a", "130", "-w", str(filename), line],
+                       check=True, capture_output=True, text=True)
+        print("WARNING: Using local synthetic female-style fallback voice.", flush=True)
     finally:
         mp3.unlink(missing_ok=True)
     with wave.open(str(filename), "rb") as w:
@@ -376,7 +386,7 @@ def generate(args):
         'video_width':720 if args.format=='shorts' else WIDTH,
         'video_height':1280 if args.format=='shorts' else HEIGHT,
         'made_for_kids':True,'original_visuals':True,'original_instrumental':True,
-        'voice_engine':'none' if args.no_voice else 'edge-tts en-US-JennyNeural',
+        'voice_engine':'none' if args.no_voice else 'Jenny Neural (eSpeak fallback if unavailable)',
         'scenes':[{'headline':s.headline,'speech':s.speech,'seconds':s.seconds} for s in scenes],
         'publishing_note':'Human review strongly recommended before making public; templated content may not meet YouTube monetization policy.'
     }
