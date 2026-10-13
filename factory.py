@@ -14,6 +14,7 @@ import textwrap
 import wave
 
 from PIL import Image, ImageDraw, ImageFont
+from extra_topics import EXTRA_TOPICS, make_extra_story
 
 WIDTH, HEIGHT, RATE = 960, 540, 22050
 WHITE = (255, 255, 255)
@@ -23,7 +24,7 @@ COLORS = {
     "yellow": (255, 198, 62), "purple": (164, 103, 204),
     "green": (83, 178, 125)
 }
-TOPICS = ("colors", "counting", "shapes")
+TOPICS = ("colors", "counting", "shapes") + tuple(EXTRA_TOPICS)
 FONT_PATHS = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
@@ -60,6 +61,8 @@ def centered(d, x, y, word, size, color=INK):
 
 def create_story(topic, seed):
     """Finite authored story frameworks. Not a claim of generative AI storytelling."""
+    if topic in EXTRA_TOPICS:
+        return make_extra_story(topic, seed, Scene)
     rng = random.Random(seed)
     hero = rng.choice(("Bibi Bunny", "Pip Puppy", "Mimi Kitten", "Toto Bear"))
     landscape = rng.choice(("the Rainbow Meadow", "the Sunny Valley", "the Starry Garden"))
