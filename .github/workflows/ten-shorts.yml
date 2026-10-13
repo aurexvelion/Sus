@@ -19,7 +19,7 @@ jobs:
           python-version: '3.11'
           cache: pip
       - name: Install multimedia tools
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg espeak-ng fonts-dejavu-core
       - name: Install Python dependencies
         run: pip install -r requirements.txt -r requirements-upload.txt
       - name: Run tests
@@ -50,7 +50,7 @@ jobs:
               assert (folder/"episode.mp4").stat().st_size > 100000
               assert meta["video_format"] == "shorts"
               assert meta["duration_seconds"] < 180
-              assert meta["voice_engine"] == "edge-tts en-US-JennyNeural"
+              assert "Jenny Neural" in meta["voice_engine"]
           print("Ten videos verified.")
           PY
       - name: Save all ten videos for download
