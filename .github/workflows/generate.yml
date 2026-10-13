@@ -1,0 +1,72 @@
+name: Generate original cartoon
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: Learning topic
+        required: true
+        default: random
+        type: choice
+        options:
+          - random
+          - colors
+          - counting
+          - shapes
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/generate.yml'
+  schedule:
+    # 14:20 UTC on Tuesdays and Fridays.
+    - cron: '20 14 * * 2,5'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cartoon-factory
+  cancel-in-progress: false
+
+jobs:
+  create-episode:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install free multimedia tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg espeak-ng fonts-dejavu-core
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt -r requirements-upload.txt
+      - name: Run local unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Generate video, voice, music, thumbnail and description
+        env:
+          TOPIC: ${{ inputs.topic || 'random' }}
+          SEED: ${{ github.run_id }}
+        run: python factory.py --topic "$TOPIC" --seed "$SEED" --output build
+      - name: Save cartoon for download on phone
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cartoon-${{ github.run_id }}
+          path: |
+            build/episode.mp4
+            build/thumbnail.jpg
+            build/metadata.json
+            build/captions.txt
+          retention-days: 7
+          if-no-files-found: warn
+      - name: OPTIONAL private YouTube upload
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: python upload_youtube.py build
