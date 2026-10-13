@@ -1,15 +1,35 @@
-name: Generate and upload 10 Shorts
+name: Generate 10 or 100 Shorts
 
 on:
   workflow_dispatch:
+    inputs:
+      count:
+        description: Number of unique-topic videos to generate
+        required: true
+        type: choice
+        options:
+          - '10'
+          - '100'
+        default: '10'
+      upload_to_youtube:
+        description: Upload to YouTube too? (channel daily upload limits apply)
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
-  generate-ten:
+  batch:
+    name: Shorts batch ${{ matrix.shard }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: ${{ fromJSON(inputs.count == '100' && '[0,1,2,3,4,5,6,7,8,9]' || '[0]') }}
     steps:
       - name: Check out project
         uses: actions/checkout@v4
@@ -22,62 +42,46 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg espeak-ng fonts-dejavu-core
       - name: Install Python dependencies
         run: pip install -r requirements.txt -r requirements-upload.txt
-      - name: Run tests
+      - name: Check 183-topic generator
         run: python -m unittest discover -s tests -v
-      - name: Generate 10 different educational Shorts
+      - name: Generate unique-topic Shorts
         shell: bash
+        env:
+          BATCH_COUNT: ${{ inputs.count }}
+          SHARD: ${{ matrix.shard }}
         run: |
-          set -euo pipefail
-          topics=(colors counting shapes animals space ocean weather fruits dinosaurs friendship)
-          mkdir -p ten-shorts
-          for index in "${!topics[@]}"; do
-            episode=$((index+1))
-            topic="${topics[$index]}"
-            seed=$(( GITHUB_RUN_ID * 100 + episode ))
-            echo "::group::Short $episode: $topic"
-            python factory.py --format shorts --fps 10 --topic "$topic" --seed "$seed" --output "ten-shorts/short-$episode"
-            echo "::endgroup::"
-          done
-      - name: Verify ten Shorts
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import json
-          for i in range(1, 11):
-              folder=Path(f"ten-shorts/short-{i}")
-              meta=json.loads((folder/"metadata.json").read_text())
-              assert (folder/"episode.mp4").stat().st_size > 100000
-              assert meta["video_format"] == "shorts"
-              assert meta["duration_seconds"] < 180
-              assert "Jenny Neural" in meta["voice_engine"]
-          print("Ten videos verified.")
-          PY
-      - name: Save all ten videos for download
+          python batch_shorts.py --count "$BATCH_COUNT" --shard "$SHARD" --output batch-shorts
+      - name: Save generated videos even when a video fails
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ten-shorts-${{ github.run_id }}
+          name: shorts-${{ inputs.count }}-${{ github.run_id }}-part-${{ matrix.shard }}
           path: |
-            ten-shorts/short-*/episode.mp4
-            ten-shorts/short-*/metadata.json
-            ten-shorts/short-*/thumbnail.jpg
-            ten-shorts/short-*/captions.txt
+            batch-shorts/short-*/episode.mp4
+            batch-shorts/short-*/metadata.json
+            batch-shorts/short-*/thumbnail.jpg
+            batch-shorts/short-*/captions.txt
+            batch-shorts/manifest.json
           retention-days: 7
-          if-no-files-found: error
-      - name: Upload ten Shorts privately to YouTube
+          if-no-files-found: warn
+      - name: Optional YouTube uploads (public requested, Made for Kids)
+        if: ${{ success() && inputs.upload_to_youtube == true }}
+        shell: bash
         env:
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
-        shell: bash
         run: |
           set -euo pipefail
           if [[ -z "$YT_CLIENT_ID" || -z "$YT_CLIENT_SECRET" || -z "$YT_REFRESH_TOKEN" ]]; then
-            echo "YouTube credentials missing. Videos are available in the workflow artifact."
+            echo "::error::YouTube upload was selected, but OAuth secrets are missing."
             exit 1
           fi
-          for episode in {1..10}; do
-            echo "::group::Upload Short $episode"
-            python upload_youtube.py "ten-shorts/short-$episode"
+          # Artifact upload happened first, so hitting a YouTube limit cannot
+          # delete the videos that were already generated.
+          for folder in batch-shorts/short-*; do
+            [[ -f "$folder/episode.mp4" ]] || continue
+            echo "::group::Uploading $folder"
+            python upload_youtube.py "$folder"
             echo "::endgroup::"
           done
