@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Zero-API, original preschool cartoon generator. Requires Pillow + FFmpeg + eSpeak."""
+"""Zero-API, original preschool cartoon generator. Requires Pillow + FFmpeg + edge-tts (network access)."""
 import argparse
 from array import array
 from dataclasses import dataclass
@@ -94,16 +94,23 @@ def create_story(topic, seed):
 
 
 def make_narration(line, filename):
-    synth = shutil.which("espeak-ng") or shutil.which("espeak")
-    if not synth:
-        raise RuntimeError("eSpeak not installed. Use --no-voice to create an instrumental episode.")
-    result = subprocess.run([synth, "-s", "135", "-p", "58", "-a", "130", "-w", str(filename), line],
-                            capture_output=True, text=True)
-    if result.returncode:
-        raise RuntimeError("eSpeak failed: " + result.stderr[:300])
+    """Generate Jenny Neural speech and convert to 16-bit mono PCM for mixing."""
+    mp3 = Path(filename).with_suffix(".mp3")
+    try:
+        subprocess.run(
+            ["python", "-m", "edge_tts", "--voice", "en-US-JennyNeural",
+             "--rate=-10%", "--pitch=+0Hz", "--text", line,
+             "--write-media", str(mp3)],
+            check=True, capture_output=True, text=True, timeout=120)
+        subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+             "-i", str(mp3), "-ar", str(RATE), "-ac", "1",
+             "-c:a", "pcm_s16le", str(filename)],
+            check=True, capture_output=True, text=True, timeout=60)
+    finally:
+        mp3.unlink(missing_ok=True)
     with wave.open(str(filename), "rb") as w:
-        return w.getnframes()/w.getframerate()
-
+        return w.getnframes() / w.getframerate()
 
 def read_narration(path):
     if not path:
@@ -369,7 +376,7 @@ def generate(args):
         'video_width':720 if args.format=='shorts' else WIDTH,
         'video_height':1280 if args.format=='shorts' else HEIGHT,
         'made_for_kids':True,'original_visuals':True,'original_instrumental':True,
-        'voice_engine':'none' if args.no_voice else 'espeak',
+        'voice_engine':'none' if args.no_voice else 'edge-tts en-US-JennyNeural',
         'scenes':[{'headline':s.headline,'speech':s.speech,'seconds':s.seconds} for s in scenes],
         'publishing_note':'Human review strongly recommended before making public; templated content may not meet YouTube monetization policy.'
     }
