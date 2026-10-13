@@ -1,0 +1,83 @@
+name: Generate and upload 10 Shorts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate-ten:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install multimedia tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt -r requirements-upload.txt
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+      - name: Generate 10 different educational Shorts
+        shell: bash
+        run: |
+          set -euo pipefail
+          topics=(colors counting shapes animals space ocean weather fruits dinosaurs friendship)
+          mkdir -p ten-shorts
+          for index in "${!topics[@]}"; do
+            episode=$((index+1))
+            topic="${topics[$index]}"
+            seed=$(( GITHUB_RUN_ID * 100 + episode ))
+            echo "::group::Short $episode: $topic"
+            python factory.py --format shorts --fps 10 --topic "$topic" --seed "$seed" --output "ten-shorts/short-$episode"
+            echo "::endgroup::"
+          done
+      - name: Verify ten Shorts
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          for i in range(1, 11):
+              folder=Path(f"ten-shorts/short-{i}")
+              meta=json.loads((folder/"metadata.json").read_text())
+              assert (folder/"episode.mp4").stat().st_size > 100000
+              assert meta["video_format"] == "shorts"
+              assert meta["duration_seconds"] < 180
+              assert meta["voice_engine"] == "edge-tts en-US-JennyNeural"
+          print("Ten videos verified.")
+          PY
+      - name: Save all ten videos for download
+        uses: actions/upload-artifact@v4
+        with:
+          name: ten-shorts-${{ github.run_id }}
+          path: |
+            ten-shorts/short-*/episode.mp4
+            ten-shorts/short-*/metadata.json
+            ten-shorts/short-*/thumbnail.jpg
+            ten-shorts/short-*/captions.txt
+          retention-days: 7
+          if-no-files-found: error
+      - name: Upload ten Shorts privately to YouTube
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$YT_CLIENT_ID" || -z "$YT_CLIENT_SECRET" || -z "$YT_REFRESH_TOKEN" ]]; then
+            echo "YouTube credentials missing. Videos are available in the workflow artifact."
+            exit 1
+          fi
+          for episode in {1..10}; do
+            echo "::group::Upload Short $episode"
+            python upload_youtube.py "ten-shorts/short-$episode"
+            echo "::endgroup::"
+          done
