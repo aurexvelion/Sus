@@ -178,9 +178,9 @@ def character(d, name, x, y, t, color):
     d.arc((x-25,y-22,x+25,y+14),0,180,fill=(51,61,76),width=3)
 
 
-def scene_object(d, scene, t, rng):
-    x = 670 + 12*math.sin(t*1.8)
-    y = 275 + 11*math.cos(t*2.2)
+def scene_object(d, scene, t, rng, cx=670, cy=275):
+    x = cx + 12*math.sin(t*1.8)
+    y = cy + 11*math.cos(t*2.2)
     if scene.kind == 'color':
         color = COLORS[scene.focus]
         if scene.headline.endswith('BALLOON'):
@@ -218,8 +218,8 @@ def scene_object(d, scene, t, rng):
         n = scene.position
         for k in range(n):
             col = list(COLORS.values())[(k+scene.position)%5]
-            xx = 547+(k%3)*112
-            yy = 253+(k//3)*102
+            xx = x-128+(k%3)*123
+            yy = y-25+(k//3)*106
             if scene.focus == 'stars': star(d,xx,yy,42,col)
             elif scene.focus == 'apples':
                 ellipse(d,xx,yy,36,col)
@@ -266,8 +266,49 @@ def make_frame(scene, hero, seconds_in_scene, global_time, seed):
     return im
 
 
-def render_video(scenes, hero, wav, path, fps, resolution, seed):
-    dims={'540p':(960,540),'720p':(1280,720)}[resolution]
+
+def make_short_frame(scene, hero, seconds_in_scene, global_time, seed):
+    """Native portrait framing. Re-layout the scene instead of cropping a landscape image."""
+    w, h = 720, 1280
+    im = Image.new("RGB", (w, h), (213, 238, 252))
+    d = ImageDraw.Draw(im)
+    sky = (195, 234, 255) if seed % 2 == 0 else (221, 231, 255)
+    d.rectangle((0, 0, w, 1050), fill=sky)
+    ellipse(d, 575, 170, 72, (255, 224, 106))
+    for i in range(4):
+        x = ((i * 240 + global_time * 7) % 1000) - 90
+        yy = 258 + (i % 2) * 106
+        d.ellipse((x, yy, x + 144, yy + 41), fill=(250, 254, 255))
+    d.ellipse((-320, 845, 420, 1300), fill=(159, 210, 177))
+    d.ellipse((280, 885, 1040, 1420), fill=(144, 203, 166))
+    d.rectangle((0, 1007, w, h), fill=(156, 216, 171))
+    for i in range(10):
+        x = 27 + i * 76
+        y = 1004 + i % 3 * 20
+        ellipse(d, x, y, 7, (255, 171, 203))
+        ellipse(d, x, y, 3, (255, 223, 106))
+    # Titles stay in the upper third of the screen.
+    d.rounded_rectangle((65, 35, 593, 101), radius=30, fill=(255, 255, 255))
+    centered(d, 328, 66, "LITTLE WONDER LAB", 28)
+    title_lines = textwrap.wrap(scene.headline, width=17, break_long_words=False)[:2]
+    for i, line in enumerate(title_lines):
+        centered(d, 320, 158 + i*60, line, 42 if len(line) <= 15 else 35)
+    # Main animation fills the center of a 9:16 screen, never letterboxed.
+    color = ((254, 178, 122) if 'Bunny' in hero else
+             (170, 154, 226) if 'Kitten' in hero else (239, 191, 133))
+    character(d, hero, 322, 479, global_time, color)
+    scene_object(d, scene, global_time, random.Random(seed), cx=323, cy=815)
+    # Keep important words clear of Shorts' right-hand like/comment buttons.
+    d.rounded_rectangle((35, 1060, 613, 1260), radius=28,
+                        fill=(255, 255, 255), outline=(248, 196, 132), width=5)
+    lines = textwrap.wrap(scene.speech, width=32, break_long_words=False)[:4]
+    for i, line in enumerate(lines):
+        centered(d, 325, 1101 + i * 43, line, 27)
+    return im
+
+
+def render_video(scenes, hero, wav, path, fps, video_format, seed):
+    dims = (720, 1280) if video_format == 'shorts' else (WIDTH, HEIGHT)
     args=['ffmpeg','-hide_banner','-loglevel','error','-y','-f','rawvideo','-pix_fmt','rgb24',
           '-s',f'{dims[0]}x{dims[1]}','-r',str(fps),'-i','-','-i',str(wav),
           '-c:v','libx264','-preset','veryfast','-crf','26','-pix_fmt','yuv420p',
@@ -277,9 +318,8 @@ def render_video(scenes, hero, wav, path, fps, resolution, seed):
     try:
         for scene in scenes:
             for k in range(round(scene.seconds*fps)):
-                frame=make_frame(scene,hero,k/fps,t+k/fps,seed)
-                if dims != (WIDTH,HEIGHT):
-                    frame=frame.resize(dims,Image.Resampling.BILINEAR)
+                frame=(make_short_frame(scene,hero,k/fps,t+k/fps,seed) if video_format=='shorts'
+                       else make_frame(scene,hero,k/fps,t+k/fps,seed))
                 proc.stdin.write(frame.tobytes())
             t+=scene.seconds
     except BrokenPipeError as e:
@@ -307,18 +347,24 @@ def generate(args):
             clip=voice_dir/f'{idx:02d}.wav'
             spoken_time=make_narration(scene.speech,clip)
             scene.narration_path=str(clip)
-        scene.seconds=max(6.0, math.ceil(spoken_time+1.7))
+        scene.seconds=max(5.0, math.ceil(spoken_time+0.85))
+    if args.format == 'shorts' and sum(s.seconds for s in scenes) > 179:
+        raise RuntimeError('Shorts episodes must not exceed three minutes')
     music_and_voice(scenes,out/'audio.wav',seed)
-    render_video(scenes,hero,out/'audio.wav',out/'episode.mp4',args.fps,args.resolution,seed)
-    cover = make_frame(scenes[1],hero,0,0,seed).resize((1280,720),Image.Resampling.LANCZOS)
+    render_video(scenes,hero,out/'audio.wav',out/'episode.mp4',args.fps,args.format,seed)
+    cover = (make_short_frame(scenes[1],hero,0,0,seed) if args.format == 'shorts'
+             else make_frame(scenes[1],hero,0,0,seed).resize((1280,720),Image.Resampling.LANCZOS))
     cover.save(out/'thumbnail.jpg',quality=93)
     meta={
-        'title':f'{subtitle} | {hero} | Little Wonder Lab',
-        'description':f'Join {hero} on an original preschool learning adventure in {land}. Today we explore {topic}! Includes narrated learning, handmade 2D graphics, and original computer-generated music. Designed for young children. #PreschoolLearning #KidsCartoons',
-        'tags':['preschool','learning for kids',topic,'Little Wonder Lab','animated animals'],
+        'title':f'{subtitle} | {hero} #Shorts' if args.format=='shorts' else f'{subtitle} | {hero} | Little Wonder Lab',
+        'description':f'Join {hero} on an original preschool learning adventure in {land}. Today we explore {topic}! Includes narrated learning, handmade 2D graphics, and original computer-generated music. Designed for young children. #PreschoolLearning #KidsCartoons' + (' #Shorts' if args.format=='shorts' else ''),
+        'tags':['preschool','learning for kids',topic,'Little Wonder Lab','animated animals'] + (['Shorts'] if args.format=='shorts' else []),
         'category_id':'27', 'language':'en', 'topic':topic, 'character':hero,
         'seed':seed,'created_utc':datetime.now(timezone.utc).isoformat(),
         'duration_seconds':round(sum(s.seconds for s in scenes),2),
+        'video_format':args.format,
+        'video_width':720 if args.format=='shorts' else WIDTH,
+        'video_height':1280 if args.format=='shorts' else HEIGHT,
         'made_for_kids':True,'original_visuals':True,'original_instrumental':True,
         'voice_engine':'none' if args.no_voice else 'espeak',
         'scenes':[{'headline':s.headline,'speech':s.speech,'seconds':s.seconds} for s in scenes],
@@ -336,7 +382,8 @@ def main():
     p.add_argument('--seed',type=int)
     p.add_argument('--output',default='build')
     p.add_argument('--fps',type=int,choices=range(8,25),metavar='8..24',default=10)
-    p.add_argument('--resolution',choices=['540p','720p'],default='540p')
+    p.add_argument('--format',choices=['shorts','landscape'],default='shorts',
+                   help='Shorts is vertical 9:16 and the default; landscape retains the old layout')
     p.add_argument('--no-voice',action='store_true')
     generate(p.parse_args())
 
