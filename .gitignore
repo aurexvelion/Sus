@@ -1,0 +1,8 @@
+build/
+output/
+*.mp4
+*.wav
+__pycache__/
+*.pyc
+.env
+*.json.secret
