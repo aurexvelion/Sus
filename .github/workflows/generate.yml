@@ -18,6 +18,9 @@ on:
       - main
     paths:
       - '.github/workflows/generate.yml'
+      - 'factory.py'
+      - 'tests/**'
+      - 'requirements*.txt'
   schedule:
     # 14:20 UTC on Tuesdays and Fridays.
     - cron: '20 14 * * 2,5'
@@ -51,7 +54,7 @@ jobs:
         env:
           TOPIC: ${{ inputs.topic || 'random' }}
           SEED: ${{ github.run_id }}
-        run: python factory.py --topic "$TOPIC" --seed "$SEED" --output build
+        run: python factory.py --topic "$TOPIC" --format shorts --seed "$SEED" --output build
       - name: Save cartoon for download on phone
         if: always()
         uses: actions/upload-artifact@v4
