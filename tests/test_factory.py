@@ -1,5 +1,5 @@
 import unittest
-from factory import create_story, make_frame, TOPICS
+from factory import create_story, make_frame, make_short_frame, TOPICS
 
 class CartoonTests(unittest.TestCase):
     def test_scripts_have_arcs_and_unique_foci(self):
@@ -16,5 +16,6 @@ class CartoonTests(unittest.TestCase):
             for s in scenes:
                 img=make_frame(s,hero,0,0,123)
                 self.assertEqual(img.size,(960,540))
+                self.assertEqual(make_short_frame(s,hero,0,0,123).size,(720,1280))
 
 if __name__=='__main__': unittest.main()
