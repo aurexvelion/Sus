@@ -15,6 +15,7 @@ import wave
 
 from PIL import Image, ImageDraw, ImageFont
 from extra_topics import EXTRA_TOPICS, make_extra_story
+from expanded_contexts import CONTEXTS, make_context_story
 
 WIDTH, HEIGHT, RATE = 960, 540, 22050
 WHITE = (255, 255, 255)
@@ -24,7 +25,7 @@ COLORS = {
     "yellow": (255, 198, 62), "purple": (164, 103, 204),
     "green": (83, 178, 125)
 }
-TOPICS = ("colors", "counting", "shapes") + tuple(EXTRA_TOPICS)
+TOPICS = ("colors", "counting", "shapes") + tuple(EXTRA_TOPICS) + tuple(CONTEXTS)
 FONT_PATHS = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
@@ -41,6 +42,7 @@ class Scene:
     position: int = 0
     seconds: float = 0.0
     narration_path: str = ""
+    visual_category: str = ""
 
 
 def font(size):
@@ -63,6 +65,8 @@ def create_story(topic, seed):
     """Finite authored story frameworks. Not a claim of generative AI storytelling."""
     if topic in EXTRA_TOPICS:
         return make_extra_story(topic, seed, Scene)
+    if topic in CONTEXTS:
+        return make_context_story(topic, seed, Scene)
     rng = random.Random(seed)
     hero = rng.choice(("Bibi Bunny", "Pip Puppy", "Mimi Kitten", "Toto Bear"))
     landscape = rng.choice(("the Rainbow Meadow", "the Sunny Valley", "the Starry Garden"))
@@ -100,7 +104,9 @@ def make_narration(line, filename):
            "--rate=-10%", "--pitch=+0Hz", "--text", line,
            "--write-media", str(mp3)]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if getattr(make_narration, "edge_unavailable", False):
+            raise RuntimeError("Previous neural TTS request failed; skipping online retries")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if result.returncode:
             raise RuntimeError((result.stderr or result.stdout or "unknown error")[-1200:])
         subprocess.run(
@@ -109,7 +115,9 @@ def make_narration(line, filename):
              "-c:a", "pcm_s16le", str(filename)],
             check=True, capture_output=True, text=True, timeout=60)
     except (RuntimeError, subprocess.SubprocessError, OSError) as exc:
-        print(f"WARNING: Jenny Neural unavailable: {exc}", flush=True)
+        if not getattr(make_narration, "edge_unavailable", False):
+            print(f"WARNING: Jenny Neural unavailable: {exc}", flush=True)
+        make_narration.edge_unavailable = True
         synth = shutil.which("espeak-ng") or shutil.which("espeak")
         if not synth:
             raise RuntimeError("Neural voice failed and local fallback is not installed") from exc
@@ -250,6 +258,21 @@ def scene_object(d, scene, t, rng, cx=670, cy=275):
                 d.ellipse((xx-25,yy+3,xx,yy+26),fill=col)
                 d.ellipse((xx,yy+3,xx+25,yy+26),fill=col)
                 d.line((xx,yy-22,xx,yy+22),fill=INK,width=4)
+    elif scene.kind == 'context':
+        # Topic-specific vocabulary is featured honestly as an illustrated word card.
+        accent = list(COLORS.values())[(scene.position - 1) % len(COLORS)]
+        d.rounded_rectangle((x-174, y-138, x+174, y+138), radius=29,
+                            fill=(255, 255, 255), outline=accent, width=8)
+        for k in range(5):
+            star(d, x-116+k*58, y-108, 13,
+                 accent if k < scene.position else (216, 225, 234))
+        lines = textwrap.wrap(scene.focus.upper(), width=13, break_long_words=False)
+        if not lines:
+            lines = [scene.focus.upper()]
+        for i, wordline in enumerate(lines[:3]):
+            centered(d, x, y-18+i*39-(len(lines[:3])-1)*19, wordline,
+                     30 if len(wordline) <= 13 else 24)
+        centered(d, x, y+93, f"WORD {scene.position} OF 5", 21, accent)
     else:
         for k in range(5):
             star(d,x-170+k*85,y-20+20*math.sin(t+k),27,list(COLORS.values())[k])
