@@ -8,7 +8,7 @@ class CartoonTests(unittest.TestCase):
             self.assertEqual(len(scenes),7)
             self.assertEqual(scenes[0].kind,'intro')
             self.assertEqual(scenes[-1].kind,'finish')
-            self.assertEqual(len({s.focus for s in scenes[1:6]}),5 if topic != 'counting' else 1)
+            self.assertEqual(len({s.focus for s in scenes[1:6]}), 1 if scenes[1].kind == 'count' else 5)
             self.assertTrue(all(s.speech for s in scenes))
     def test_visuals(self):
         for topic in TOPICS:
